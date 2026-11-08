@@ -1,0 +1,279 @@
+package com.example.calculator;
+
+import jakarta.servlet.annotation.WebServlet;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.util.*;
+
+/**
+ * Gantt Chart Calculator (Critical Path Method) as a servlet.
+ * Open: http://localhost:8080/<context>/gantt
+ */
+@WebServlet("/gantt")
+public class GanttServlet extends HttpServlet {
+
+    static class Task {
+        String name;
+        int duration;
+        List<String> deps = new ArrayList<>();
+        List<Task> next = new ArrayList<>();
+        int es, ef, ls, lf, slack;
+        boolean critical;
+    }
+
+    static class Result {
+        List<Task> byStart = new ArrayList<>();
+        int total;
+        String path = "";
+    }
+
+    @Override
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        List<String[]> rows = new ArrayList<>();
+        rows.add(new String[]{"A Requirements", "2", ""});
+        rows.add(new String[]{"B Board Design", "3", "A"});
+        rows.add(new String[]{"C Graphics and Sound", "2", "A"});
+        rows.add(new String[]{"D Sholo Guti Logic", "5", "B"});
+        rows.add(new String[]{"E Bagh Chhagol Logic", "5", "B"});
+        rows.add(new String[]{"F Computer AI", "4", "D, E"});
+        rows.add(new String[]{"G Home Page and UI", "3", "B, C"});
+        rows.add(new String[]{"H Testing", "3", "F, G"});
+        rows.add(new String[]{"I Report Writing", "4", "D, E"});
+        rows.add(new String[]{"J Slides and Banner", "2", "H, I"});
+        render(resp, rows, null, null);
+    }
+
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        req.setCharacterEncoding("UTF-8");
+        String[] names = req.getParameterValues("name");
+        String[] durs = req.getParameterValues("dur");
+        String[] deps = req.getParameterValues("dep");
+        List<String[]> rows = new ArrayList<>();
+        if (names != null) {
+            for (int i = 0; i < names.length; i++) {
+                String d = (durs != null && i < durs.length) ? durs[i] : "";
+                String p = (deps != null && i < deps.length) ? deps[i] : "";
+                rows.add(new String[]{names[i], d, p});
+            }
+        }
+        Result result = null;
+        String error = null;
+        try {
+            result = calculate(rows);
+        } catch (NumberFormatException e) {
+            error = "Duration must be a whole number (e.g. 3).";
+        } catch (IllegalArgumentException e) {
+            error = e.getMessage();
+        }
+        if (rows.isEmpty()) rows.add(new String[]{"", "", ""});
+        render(resp, rows, error, result);
+    }
+
+    // ---------------------------------------------------------------- CPM logic
+
+    private static String norm(String s) {
+        return s == null ? "" : s.trim().replaceAll("\\s+", " ");
+    }
+
+    private Result calculate(List<String[]> rows) {
+        Map<String, Task> tasks = new LinkedHashMap<>();
+        for (String[] r : rows) {
+            String name = norm(r[0]);
+            if (name.isEmpty()) continue;
+            String key = name.toLowerCase();
+            if (tasks.containsKey(key)) throw new IllegalArgumentException("Duplicate task name: " + name);
+            Task t = new Task();
+            t.name = name;
+            t.duration = Integer.parseInt(r[1].trim());
+            if (t.duration <= 0)
+                throw new IllegalArgumentException("Duration of '" + name + "' must be greater than 0.");
+            for (String d : r[2].split(",")) {
+                if (!d.trim().isEmpty()) t.deps.add(norm(d).toLowerCase());
+            }
+            tasks.put(key, t);
+        }
+        if (tasks.isEmpty()) throw new IllegalArgumentException("Add at least one task.");
+
+        // A dependency can be the full task name or just its ID (first word, e.g. "A")
+        Map<String, String> idMap = new HashMap<>();
+        Set<String> ambiguous = new HashSet<>();
+        for (String key : tasks.keySet()) {
+            String id = key.split(" ")[0];
+            if (idMap.containsKey(id)) ambiguous.add(id);
+            else idMap.put(id, key);
+        }
+        for (Map.Entry<String, Task> e : tasks.entrySet()) {
+            Task t = e.getValue();
+            List<String> resolved = new ArrayList<>();
+            for (String d : t.deps) {
+                String r;
+                if (tasks.containsKey(d)) r = d;
+                else if (ambiguous.contains(d))
+                    throw new IllegalArgumentException("'" + d + "' matches more than one task. Use the full task name.");
+                else r = idMap.get(d);
+                if (r == null)
+                    throw new IllegalArgumentException("'" + t.name + "' depends on unknown task: " + d);
+                if (r.equals(e.getKey()))
+                    throw new IllegalArgumentException("'" + t.name + "' cannot depend on itself.");
+                if (!resolved.contains(r)) resolved.add(r);
+            }
+            t.deps = resolved;
+        }
+
+        // Topological sort (Kahn)
+        Map<Task, Integer> indeg = new LinkedHashMap<>();
+        for (Task t : tasks.values()) indeg.put(t, t.deps.size());
+        for (Task t : tasks.values())
+            for (String d : t.deps) tasks.get(d).next.add(t);
+        Deque<Task> queue = new ArrayDeque<>();
+        for (Task t : tasks.values()) if (indeg.get(t) == 0) queue.add(t);
+        List<Task> order = new ArrayList<>();
+        while (!queue.isEmpty()) {
+            Task t = queue.poll();
+            order.add(t);
+            for (Task n : t.next) {
+                indeg.put(n, indeg.get(n) - 1);
+                if (indeg.get(n) == 0) queue.add(n);
+            }
+        }
+        if (order.size() != tasks.size())
+            throw new IllegalArgumentException("Circular dependency found. Please fix the 'Depends on' column.");
+
+        // Forward pass
+        int end = 0;
+        for (Task t : order) {
+            int es = 0;
+            for (String d : t.deps) es = Math.max(es, tasks.get(d).ef);
+            t.es = es;
+            t.ef = es + t.duration;
+            end = Math.max(end, t.ef);
+        }
+        // Backward pass
+        for (int i = order.size() - 1; i >= 0; i--) {
+            Task t = order.get(i);
+            int lf = end;
+            for (Task n : t.next) lf = Math.min(lf, n.ls);
+            t.lf = lf;
+            t.ls = lf - t.duration;
+            t.slack = t.ls - t.es;
+            t.critical = t.slack == 0;
+        }
+
+        Result res = new Result();
+        res.total = end;
+        res.byStart.addAll(order);
+        res.byStart.sort(Comparator.comparingInt((Task t) -> t.es).thenComparingInt(t -> t.ef));
+        StringBuilder path = new StringBuilder();
+        for (Task t : order) {
+            if (t.critical) {
+                if (path.length() > 0) path.append(" &rarr; ");
+                path.append(esc(t.name));
+            }
+        }
+        res.path = path.toString();
+        return res;
+    }
+
+    // ---------------------------------------------------------------- HTML output
+
+    private static String esc(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace("\"", "&quot;").replace("'", "&#39;");
+    }
+
+    private static String pct(double v) {
+        return String.format(Locale.US, "%.4f", v);
+    }
+
+    private void render(HttpServletResponse resp, List<String[]> rows, String error, Result res)
+            throws IOException {
+        resp.setContentType("text/html;charset=UTF-8");
+        PrintWriter out = resp.getWriter();
+
+        out.println("<!DOCTYPE html><html><head><meta charset='UTF-8'>");
+        out.println("<meta name='viewport' content='width=device-width, initial-scale=1'>");
+        out.println("<title>Gantt Chart Calculator</title><style>");
+        out.println("body{font-family:Arial,sans-serif;background:#eef2f7;margin:0;padding:24px}");
+        out.println(".card{background:#fff;max-width:960px;margin:0 auto 20px;padding:20px 26px;border-radius:12px;box-shadow:0 3px 12px rgba(0,0,0,.12)}");
+        out.println("h1{margin:0 0 4px;font-size:24px}h2{margin:0 0 12px;font-size:18px}p.sub{margin:0 0 14px;color:#555}");
+        out.println("table{border-collapse:collapse;width:100%}th,td{border:1px solid #d5dbe3;padding:6px 8px;text-align:left}");
+        out.println("th{background:#f1f4f9}input{width:100%;box-sizing:border-box;padding:6px;font-size:14px}");
+        out.println("button{padding:9px 16px;margin:10px 8px 0 0;font-size:15px;border:none;border-radius:6px;cursor:pointer;background:#2563eb;color:#fff}");
+        out.println("button.alt{background:#64748b}button.del{padding:4px 10px;margin:0;background:#dc3545}");
+        out.println(".err{background:#fdecea;color:#b71c1c;padding:12px;border-radius:6px;margin-bottom:14px}");
+        out.println(".sum{background:#e8f7ec;padding:12px;border-radius:6px;font-size:16px;margin-bottom:14px}");
+        out.println(".crit{color:#dc3545;font-weight:bold}");
+        out.println(".grow{display:flex;align-items:center;height:32px}");
+        out.println(".lab{width:170px;flex:none;font-size:14px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}");
+        out.println(".trk{position:relative;flex:1;height:100%;margin-right:24px;border-left:1px solid #ccc}");
+        out.println(".bar{position:absolute;top:5px;height:22px;border-radius:5px;color:#fff;font-size:12px;line-height:22px;text-align:center;overflow:hidden;min-width:3px}");
+        out.println(".bar.c{background:#dc3545}.bar.n{background:#3478d2}");
+        out.println(".tick{position:absolute;top:0;font-size:12px;color:#444;transform:translateX(-50%)}");
+        out.println("</style>");
+        out.println("<script>");
+        out.println("function addRow(){var tb=document.getElementById('tb');var r=tb.rows[0].cloneNode(true);"
+                + "var i=r.getElementsByTagName('input');for(var k=0;k<i.length;k++)i[k].value='';tb.appendChild(r);}");
+        out.println("function delRow(b){var tb=document.getElementById('tb');if(tb.rows.length>1)b.closest('tr').remove();}");
+        out.println("</script></head><body>");
+
+        // ---- Input card
+        out.println("<div class='card'><h1>Project Gantt Chart Calculator</h1>");
+        out.println("<p class='sub'>Name each task with a unique first word (A, B, C...). In &ldquo;Depends on&rdquo; write those letters, e.g. <b>B, C</b>.</p>");
+        if (error != null) out.println("<div class='err'>" + esc(error) + "</div>");
+        out.println("<form method='post' action='gantt'>");
+        out.println("<table><thead><tr><th>Task</th><th style='width:110px'>Duration (days)</th>"
+                + "<th>Depends on (comma separated)</th><th style='width:60px'></th></tr></thead><tbody id='tb'>");
+        for (String[] r : rows) {
+            out.println("<tr><td><input name='name' value='" + esc(r[0]) + "'></td>"
+                    + "<td><input name='dur' type='number' min='1' value='" + esc(r[1]) + "'></td>"
+                    + "<td><input name='dep' value='" + esc(r[2]) + "'></td>"
+                    + "<td><button type='button' class='del' onclick='delRow(this)'>X</button></td></tr>");
+        }
+        out.println("</tbody></table>");
+        out.println("<button type='button' class='alt' onclick='addRow()'>Add Task</button>");
+        out.println("<button type='submit'>Calculate Gantt Chart</button>");
+        out.println("<button type='button' class='alt' onclick=\"location.href='gantt'\">Load Sample</button>");
+        out.println("</form></div>");
+
+        // ---- Result card
+        if (res != null) {
+            out.println("<div class='card'><h2>Results</h2>");
+            out.println("<div class='sum'>Project duration: <b>" + res.total + " days</b><br>Critical path: <b>"
+                    + res.path + "</b></div>");
+            out.println("<table><tr><th>Task</th><th>Duration</th><th>Start</th><th>Finish</th><th>Slack</th><th>Critical?</th></tr>");
+            for (Task t : res.byStart) {
+                out.println("<tr><td>" + esc(t.name) + "</td><td>" + t.duration + "</td><td>" + t.es + "</td><td>"
+                        + t.ef + "</td><td>" + t.slack + "</td><td"
+                        + (t.critical ? " class='crit'>YES" : ">no") + "</td></tr>");
+            }
+            out.println("</table></div>");
+
+            // ---- Gantt chart card
+            out.println("<div class='card'><h2>Gantt Chart <span style='font-size:13px;font-weight:normal'>(red = critical path)</span></h2>");
+            String grid = "background-image:linear-gradient(to right,#e3e3e3 1px,transparent 1px);background-size:"
+                    + pct(100.0 / res.total) + "% 100%;";
+            int step = res.total <= 30 ? 1 : (res.total <= 100 ? 5 : 10);
+            out.println("<div class='grow'><div class='lab'><b>Day</b></div><div class='trk' style='border-left:none'>");
+            for (int d = 0; d <= res.total; d += step) {
+                out.println("<span class='tick' style='left:" + pct(100.0 * d / res.total) + "%'>" + d + "</span>");
+            }
+            out.println("</div></div>");
+            for (Task t : res.byStart) {
+                double left = 100.0 * t.es / res.total;
+                double width = 100.0 * t.duration / res.total;
+                out.println("<div class='grow'><div class='lab' title='" + esc(t.name) + "'>" + esc(t.name) + "</div>"
+                        + "<div class='trk' style='" + grid + "'>"
+                        + "<div class='bar " + (t.critical ? "c" : "n") + "' style='left:" + pct(left)
+                        + "%;width:" + pct(width) + "%'>" + t.duration + "d</div></div></div>");
+            }
+            out.println("</div>");
+        }
+        out.println("</body></html>");
+    }
+}
