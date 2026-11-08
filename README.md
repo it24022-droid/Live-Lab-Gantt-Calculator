@@ -7,7 +7,7 @@ finish day of every task, the critical path, the total project duration and draw
 **Name:** Shayla Akter
 **ID:** IT24022
 **Department:** Information and Communication Technology (ICT), MBSTU
-**Session:** 2023-24 (2nd Year 2nd Semester)
+**Session:** 2023-24 (3rd Year 1st Semester)
 
 ---
 
