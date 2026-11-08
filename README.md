@@ -134,12 +134,14 @@ D and E run at the same time and both take 5 days, so both are critical.
 
 ## 9. Screenshots
 
-Add the screenshots here:
+Task table:
+<img width="1018" height="627" alt="photo_2026-11-08_08-15-03" src="https://github.com/user-attachments/assets/37e0dfa1-6d32-4a6e-8a47-152a6cde152c" />
+Result table:
+<img width="1020" height="511" alt="photo_2026-11-08_08-15-56" src="https://github.com/user-attachments/assets/8e721a5f-4254-4946-8b6a-cf7d2014ea91" />
 
-- `screenshots/input.png` - the task table
-- `screenshots/result.png` - results table and critical path
-- `screenshots/gantt.png` - the Gantt chart
-- `screenshots/error.png` - an error message (for example circular dependency)
+Gantt chart:
+<img width="1020" height="511" alt="photo_2026-11-08_08-15-56" src="https://github.com/user-attachments/assets/1bd955ed-4ced-440f-b29d-efcfb1e5628d" />
+
 
 ## 10. Problems I Faced
 
