@@ -140,7 +140,8 @@ Result table:
 <img width="1020" height="511" alt="photo_2026-11-08_08-15-56" src="https://github.com/user-attachments/assets/8e721a5f-4254-4946-8b6a-cf7d2014ea91" />
 
 Gantt chart:
-<img width="1020" height="511" alt="photo_2026-11-08_08-15-56" src="https://github.com/user-attachments/assets/1bd955ed-4ced-440f-b29d-efcfb1e5628d" />
+
+<img width="1021" height="432" alt="photo_2026-11-08_08-16-28" src="https://github.com/user-attachments/assets/5d10b99e-fb5f-4d56-be0d-74200ab9e510" />
 
 
 ## 10. Problems I Faced
