@@ -1,1 +1,0 @@
-# Live-Lab-Gantt-Calculator
